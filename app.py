@@ -10,12 +10,11 @@ import os
 API_KEY = "AIzaSyAycw9hVYcrpTOJoHpT4Kserqci826Rq2A"
 genai.configure(api_key=API_KEY)
 
-# Model နာမည်ကို အလုပ်လုပ်ဖို့ အသေချာဆုံးဖြစ်တဲ့ 'gemini-1.5-flash' လို့ ပြန်ပြင်ထားပါတယ်
-llm_model = genai.GenerativeModel('gemini-1.5-flash')
+# Model နာမည်ကို အလုပ်လုပ်ဖို့ အသေချာဆုံးပုံစံနဲ့ ပြင်ထားပါတယ်
+llm_model = genai.GenerativeModel('models/gemini-1.5-flash')
 
 st.set_page_config(page_title="Universal AI Video Translator", page_icon="🌍")
 st.title("🌍 Universal AI Video Translator")
-st.markdown("ဗီဒီယိုထဲမှာ ဘယ်ဘာသာစကား (အင်္ဂလိပ်၊ ထိုင်း၊ တရုတ်၊ ဂျပန်) ပြောပြော AI က အလိုအလျောက် နားလည်ပြီး မြန်မာလို ပြန်ပေးပါမယ်။")
 
 @st.cache_resource
 def load_model():
@@ -43,7 +42,7 @@ if uploaded_file is not None:
 
                 # ၂။ Gemini နဲ့ မြန်မာလို ပြန်ဆိုခြင်း
                 st.info("အဆင့် (၂): မြန်မာလို ပီပီသသ ပြန်ဆိုနေပါတယ်...")
-                prompt = f"The text is in {detected_lang}. Translate to natural Burmese: {original_text}"
+                prompt = f"The text is in {detected_lang}. Translate to natural, professional Burmese: {original_text}"
                 response = llm_model.generate_content(prompt)
                 mm_text = response.text
                 
@@ -64,4 +63,4 @@ if uploaded_file is not None:
                 os.remove(video_path)
                 
             except Exception as e:
-                st.error(f"Error: {str(e)}")
+                st.error(f"Error အသေးစိတ်: {str(e)}")
