@@ -2,4 +2,3 @@ openai-whisper
 groq
 edge-tts
 streamlit
-moviepy
