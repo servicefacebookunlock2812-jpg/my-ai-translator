@@ -6,19 +6,16 @@ import asyncio
 import tempfile
 import os
 import re
-from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip
-import numpy as np
 from pydub import AudioSegment
-from pydub.silence import detect_nonsilent
-import json
+from pydub.silence import split_on_silence
 
 # Groq Setup
 GROQ_API_KEY = "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"
 client = Groq(api_key=GROQ_API_KEY)
 
-st.set_page_config(page_title="AI Video Dubbing", page_icon="🎬")
-st.title("🎬 AI Video Dubbing - ဇတ်ကားအသံပြောင်း")
-st.markdown("**ဇတ်ကားထဲက ဇာတ်ဆောင်အသံတွေကို မြန်မာအသံနဲ့ အစားထိုးမယ်**")
+st.set_page_config(page_title="Universal AI Translator", page_icon="🌐")
+st.title("🌐 Universal AI Video Translator")
+st.markdown("**Video ထဲက လူတွေပြောတဲ့စကားကို တိုက်ရိုက် မြန်မာလို ပြန်ပေးမယ်**")
 
 @st.cache_resource
 def load_whisper():
@@ -26,301 +23,154 @@ def load_whisper():
 
 model = load_whisper()
 
-def extract_audio_segments(video_path, timestamps):
-    """Video ကနေ အသံအပိုင်းလေးတွေထုတ်ယူ"""
+def extract_audio_from_video(video_path, audio_path="temp_audio.wav"):
+    """Video ကနေ audio ထုတ်ယူခြင်း"""
     try:
-        video = VideoFileClip(video_path)
-        audio_segments = []
-        
-        for i, (start, end, text) in enumerate(timestamps):
-            # အသံအပိုင်းလေးထုတ်
-            segment_audio = video.audio.subclip(start, end)
-            segment_path = f"temp_segment_{i}.wav"
-            segment_audio.write_audiofile(segment_path, verbose=False, logger=None)
-            audio_segments.append(segment_path)
-        
-        video.close()
-        return audio_segments
+        video = AudioSegment.from_file(video_path)
+        video.export(audio_path, format="wav")
+        return audio_path
     except Exception as e:
-        st.error(f"Audio segment ထုတ်ယူရာတွင် error: {str(e)}")
+        st.error(f"Audio ထုတ်ယူရာတွင် error: {str(e)}")
         return None
 
-def create_dubbed_video(original_video_path, burmese_audio_path, output_path="dubbed_video.mp4"):
-    """မြန်မာအသံနဲ့ video ပြန်လုပ်ခြင်း"""
-    try:
-        # Original video ကိုဖွင့်
-        video = VideoFileClip(original_video_path)
-        
-        # မြန်မာအသံကိုဖွင့်
-        burmese_audio = AudioFileClip(burmese_audio_path)
-        
-        # Original audio ကို mute လုပ်ပြီး မြန်မာအသံထည့်
-        video = video.without_audio()
-        final_video = video.set_audio(burmese_audio)
-        
-        # Video သိမ်းခြင်း
-        final_video.write_videofile(
-            output_path,
-            codec='libx264',
-            audio_codec='aac',
-            temp_audiofile='temp-audio.m4a',
-            remove_temp=True,
-            verbose=False,
-            logger=None
-        )
-        
-        video.close()
-        burmese_audio.close()
-        final_video.close()
-        
-        return output_path
-    except Exception as e:
-        st.error(f"Dubbed video ဖန်တီးရာတွင် error: {str(e)}")
-        return None
+def clean_translated_text(text):
+    """မြန်မာစာသားကို သန့်ရှင်းပေးခြင်း"""
+    # စာကြောင်းတွေကို သပ်သပ်ရပ်ရပ် ဖြစ်အောင်
+    text = re.sub(r'([။?!])', r'\1\n', text)
+    # အပိုစာလုံးများဖယ်ရှား
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
-uploaded_file = st.file_uploader("ဇတ်ကား/ဗီဒီယို ဖိုင်တင်ပေးပါ", 
-                                type=['mp4', 'mov', 'avi', 'mkv'])
+uploaded_file = st.file_uploader("ဗီဒီယို ဖိုင်ကို တင်ပေးပါ", type=['mp4', 'mov', 'avi', 'mkv', 'mp3', 'wav'])
 
 if uploaded_file is not None:
-    st.video(uploaded_file)
-    
-    if st.button("🎭 အသံပြောင်းမယ် (Dubbing)"):
-        with st.spinner('ဇတ်ကားထဲက အသံတွေကို မြန်မာလို ပြောင်းနေပါတယ်...'):
+    if st.button("🎤 Video ထဲက စကားသံကို မြန်မာလို ပြန်ပေးမယ်"):
+        with st.spinner('Video ထဲက စကားသံတွေကို နားထောင်ပြီး မြန်မာလို ပြန်နေပါတယ်...'):
             try:
-                # ၁။ Temporary file သိမ်းခြင်း
+                # Temporary file သိမ်းခြင်း
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tfile:
                     tfile.write(uploaded_file.read())
                     video_path = tfile.name
+
+                st.info("📹 Video ဖိုင်ကို ဖွင့်နေပါတယ်...")
                 
-                st.info("🔍 ဇတ်ကားထဲက စကားသံတွေကို ဖော်ထုတ်နေပါတယ်...")
+                # ၁။ Video ကနေ audio ထုတ်ယူ
+                audio_path = extract_audio_from_video(video_path)
+                if not audio_path:
+                    st.error("Audio ထုတ်ယူ၍မရပါ")
+                    return
                 
-                # ၂။ Whisper နဲ့ transcription with timestamps
+                st.info("👂 Video ထဲက စကားသံတွေကို နားထောင်နေပါတယ်...")
+                
+                # ၂။ Whisper နဲ့ တိုက်ရိုက် transcription
                 result = model.transcribe(
-                    video_path,
-                    language=None,
+                    audio_path,
+                    language=None,  # Auto detect language
                     task="transcribe",
-                    verbose=False,
-                    word_timestamps=True
+                    verbose=True
                 )
                 
-                # ၃။ Dialogue segments များရယူ
-                dialogues = []
-                current_segment = ""
-                current_start = 0
+                original_text = result['text']
+                detected_lang = result.get('language', 'unknown').upper()
                 
-                for segment in result['segments']:
-                    text = segment['text'].strip()
-                    start = segment['start']
-                    end = segment['end']
-                    
-                    if text:  # စကားပြောတဲ့အပိုင်းပဲ
-                        dialogues.append({
-                            'text': text,
-                            'start': start,
-                            'end': end,
-                            'duration': end - start
-                        })
+                st.success(f"✅ ဘာသာစကားတွေ့ရှိပြီ: **{detected_lang}**")
                 
-                st.success(f"✅ စကားပြောအပိုင်း {len(dialogues)} ပိုင်းတွေ့ရှိပြီ")
+                with st.expander("🔍 မူရင်းစကားသံများ (Original Audio Text)"):
+                    st.write(original_text)
                 
-                # ၄။ မြန်မာလို ဘာသာပြန်ခြင်း
+                # ၃။ မြန်မာလို တိုက်ရိုက် ဘာသာပြန်
                 st.info("🌐 မြန်မာလို ဘာသာပြန်နေပါတယ်...")
-                
-                # Dialogue တွေကို group လုပ်ခြင်း (context အတွက်)
-                dialogue_texts = [d['text'] for d in dialogues]
-                combined_text = "\n\n".join([f"[{i+1}] {text}" for i, text in enumerate(dialogue_texts)])
                 
                 completion = client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=[
-                        {"role": "system", "content": """မင်းက professional video dubbing translator ဖြစ်တယ်။ 
-                        ဇတ်ကားထဲက ဇာတ်ဆောင်တွေပြောတဲ့ စကားတွေကို မြန်မာလို dubbing လုပ်ဖို့ ပြန်ပေးရမယ်။
+                        {"role": "system", "content": """မင်းက professional ဘာသာပြန်ဆရာဖြစ်တယ်။ 
+                        Video ထဲက လူတွေပြောနေတဲ့ စကားသံကို မြန်မာလိုပြန်ပေးရမယ်။
                         
-                        **Dubbing အတွက် သတိထားရမယ့်အချက်များ:**
-                        1. **Lip sync ကိုက်ညီအောင်** - ပါးစပ်လှုပ်ရှားမှုနဲ့ လိုက်ဖက်အောင်
-                        2. **စကားပြောသံသဘာဝ** - ရုပ်ရှင်ထဲမှာ ပြောသလိုပြန်ရမယ်
-                        3. **အာမေးမှုနဲ့လိုက်ဖက်** - စိတ်ခံစားမှုပေါ်မူတည်ပြီး ပြန်ရမယ်
-                        4. **တိုတောင်းပြီးထိရောက်အောင်** - အသံထွက်ချိန်နဲ့ ကိုက်ညီအောင်
+                        **သတိထားရမယ့်အချက်များ:**
+                        1. **တိုက်ရိုက်ပြန်ရမယ်** - လူတွေပြောသလိုပဲ ပြန်ရမယ်
+                        2. **နေရာဒေသကိုက်ညီအောင်** - မြန်မာပြည်မှာ သုံးနေကျစကားလုံးတွေသုံးရမယ်
+                        3. **သဘာဝကျအောင်** - စာရေးသလိုမဟုတ်ဘဲ စကားပြောသလိုပြန်ရမယ်
+                        4. **အသံထွက်လွယ်အောင်** - TTS နဲ့ပြောတဲ့အခါ အဆင်ပြေအောင်
                         
-                        **ပုံစံ:**
-                        နံပါတ်တစ် စကား: [မူရင်း အင်္ဂလိပ်စာ]
-                        မြန်မာပြန်: [မြန်မာလို dubbing version]
+                        **ဥပမာ:**
+                        - "Hello, how are you?" → "ဟေ့လို၊ နေကောင်းလား?"
+                        - "I need to go to the market" → "ဈေးကိုသွားဖို့လိုတယ်"
+                        - "This is very important" → "ဒါက အရမ်းအရေးကြီးတယ်"
                         
-                        ဘာသာပြန်ချက်တွေကို နံပါတ်တစ်ခုချင်းစီအတိုင်း ပြန်ပေးပါ။"""},
+                        ဘာသာပြန်ချက်တစ်ခုတည်းကိုပဲပေးပါ။"""},
                         
-                        {"role": "user", "content": f"""ဇတ်ကားထဲက ဇာတ်ဆောင်တွေပြောတဲ့ စကားတွေကို မြန်မာလို dubbing အတွက် ပြန်ပေးပါ။
-                        တစ်ကြောင်းချင်းစီကို သီးသန့်ပြန်ပေးပါ။
+                        {"role": "user", "content": f"""ဒီ {detected_lang} စကားသံကို မြန်မာလို တိုက်ရိုက်ပြန်ပေးပါ။ 
+                        လူတွေပြောနေတဲ့ စကားသံအတိုင်း သဘာဝကျကျပြန်ပေးပါ။
                         
-                        ဇတ်ကားစကားများ:
-                        {combined_text}
+                        စကားသံ: "{original_text}"
                         
-                        မြန်မာလို dubbing version:"""}
+                        မြန်မာလို ဘာသာပြန်ချက်:"""}
                     ],
-                    temperature=0.7,
-                    max_tokens=3000
+                    temperature=0.8,  # နည်းနည်းပိုဖန်တီးနိုင်အောင်
+                    max_tokens=2000
                 )
                 
-                translated_text = completion.choices[0].message.content
+                mm_text = completion.choices[0].message.content
+                mm_text = clean_translated_text(mm_text)
                 
-                # ၅။ Translated text ကို ခွဲခြားခြင်း
-                burmese_dialogues = []
-                lines = translated_text.strip().split('\n')
+                st.success("✅ ဘာသာပြန်ပြီးပါပြီ!")
                 
-                for line in lines:
-                    if ':' in line and ']' in line:
-                        # Format: [1] မြန်မာပြန်
-                        parts = line.split(':', 1)
-                        if len(parts) == 2:
-                            burmese_dialogues.append(parts[1].strip())
+                # ၄။ မြန်မာအသံထုတ်ခြင်း (TTS)
+                st.info("🗣️ မြန်မာအသံထွက်နေပါတယ်...")
                 
-                # ၆။ မြန်မာအသံထုတ်ခြင်း (TTS)
-                st.info("🗣️ မြန်မာအသံထုတ်နေပါတယ်...")
+                output_audio = "burmese_translation.mp3"
                 
-                # Dialogue တစ်ခုချင်းစီအတွက် audio ထုတ်
-                burmese_audio_segments = []
+                # Voice setting ကို ပိုသဘာဝကျအောင်လုပ်ခြင်း
+                communicate = edge_tts.Communicate(
+                    text=mm_text,
+                    voice="my-MM-ThihaNeural",
+                    rate="+8%",      # နည်းနည်းမြန်အောင်
+                    pitch="+1Hz",    # သဘာဝကျအောင်
+                    volume="+0%"     # အသံအတိုင်း
+                )
                 
-                for i, (dialogue, burmese_text) in enumerate(zip(dialogues, burmese_dialogues)):
-                    if i < len(burmese_dialogues):
-                        try:
-                            # TTS for each dialogue
-                            output_segment = f"burmese_segment_{i}.mp3"
-                            
-                            # Adjust speech rate based on original duration
-                            original_duration = dialogue['duration']
-                            expected_words = len(burmese_text.split())
-                            
-                            # Calculate speech rate
-                            if original_duration > 0:
-                                words_per_second = expected_words / original_duration
-                                rate_adjustment = "+0%"
-                                if words_per_second > 3:
-                                    rate_adjustment = "+15%"
-                                elif words_per_second < 2:
-                                    rate_adjustment = "-10%"
-                            else:
-                                rate_adjustment = "+0%"
-                            
-                            communicate = edge_tts.Communicate(
-                                text=burmese_text,
-                                voice="my-MM-ThihaNeural",
-                                rate=rate_adjustment,
-                                pitch="+0Hz"
-                            )
-                            
-                            asyncio.run(communicate.save(output_segment))
-                            burmese_audio_segments.append(output_segment)
-                            
-                        except Exception as e:
-                            st.warning(f"Segment {i+1} အသံထုတ်ရာတွင် အခက်အခဲရှိ: {str(e)}")
+                asyncio.run(communicate.save(output_audio))
                 
-                # ၇။ Audio segments များကို ပေါင်းစပ်ခြင်း
-                if burmese_audio_segments:
-                    st.info("🔊 အသံအပိုင်းတွေကို ပေါင်းစပ်နေပါတယ်...")
+                # ၅။ ရလဒ်များပြသခြင်း
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader("🇲🇲 မြန်မာစာသား")
+                    st.text_area("ဘာသာပြန်ထားသော စာသား", mm_text, height=250, label_visibility="collapsed")
+                
+                with col2:
+                    st.subheader("🔊 မြန်မာအသံ")
+                    st.audio(output_audio, format="audio/mp3")
                     
-                    # Create combined audio with original timing
-                    final_audio = AudioSegment.silent(duration=int(dialogues[-1]['end'] * 1000))
-                    
-                    for i, (dialogue, audio_segment) in enumerate(zip(dialogues, burmese_audio_segments)):
-                        if os.path.exists(audio_segment):
-                            segment_audio = AudioSegment.from_mp3(audio_segment)
-                            
-                            # Adjust to fit original timing if needed
-                            target_duration = int(dialogue['duration'] * 1000)
-                            current_duration = len(segment_audio)
-                            
-                            if current_duration > target_duration:
-                                # Speed up slightly
-                                segment_audio = segment_audio.speedup(playback_speed=current_duration/target_duration)
-                            elif current_duration < target_duration:
-                                # Add silence at the end
-                                silence_needed = target_duration - current_duration
-                                silence = AudioSegment.silent(duration=silence_needed)
-                                segment_audio = segment_audio + silence
-                            
-                            # Overlay at correct timing
-                            start_ms = int(dialogue['start'] * 1000)
-                            final_audio = final_audio.overlay(segment_audio, position=start_ms)
-                    
-                    # Save final dubbed audio
-                    final_audio_path = "final_burmese_audio.wav"
-                    final_audio.export(final_audio_path, format="wav")
-                    
-                    # ၈။ Dubbed video ဖန်တီးခြင်း
-                    st.info("🎬 Dubbed video ဖန်တီးနေပါတယ်...")
-                    
-                    dubbed_video_path = create_dubbed_video(video_path, final_audio_path)
-                    
-                    if dubbed_video_path and os.path.exists(dubbed_video_path):
-                        st.success("✅ Dubbing ပြီးပါပြီ!")
-                        
-                        # Show results
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.subheader("🎭 မူရင်းစကားများ")
-                            for i, dialogue in enumerate(dialogues[:5]):  # Show first 5
-                                st.write(f"{i+1}. [{dialogue['start']:.1f}s-{dialogue['end']:.1f}s]: {dialogue['text']}")
-                        
-                        with col2:
-                            st.subheader("🇲🇲 မြန်မာပြန်များ")
-                            for i, text in enumerate(burmese_dialogues[:5]):
-                                st.write(f"{i+1}. {text}")
-                        
-                        st.subheader("🔊 မြန်မာအသံဥပမာ")
-                        st.audio(final_audio_path, format="audio/wav")
-                        
-                        st.subheader("🎬 Dubbed Video Preview")
-                        st.video(dubbed_video_path)
-                        
-                        # Download buttons
-                        col3, col4 = st.columns(2)
-                        
-                        with col3:
-                            with open(final_audio_path, "rb") as f:
-                                st.download_button(
-                                    label="📥 မြန်မာအသံဖိုင်",
-                                    data=f,
-                                    file_name="movie_dubbing_audio.wav",
-                                    mime="audio/wav"
-                                )
-                        
-                        with col4:
-                            with open(dubbed_video_path, "rb") as f:
-                                st.download_button(
-                                    label="📥 Dubbed Video",
-                                    data=f,
-                                    file_name="movie_burmese_dubbed.mp4",
-                                    mime="video/mp4"
-                                )
-                        
-                        # Cleanup
-                        for segment in burmese_audio_segments:
-                            if os.path.exists(segment):
-                                os.remove(segment)
-                        if os.path.exists(final_audio_path):
-                            os.remove(final_audio_path)
-                        if os.path.exists(dubbed_video_path):
-                            os.remove(dubbed_video_path)
+                    # Download button
+                    with open(output_audio, "rb") as f:
+                        st.download_button(
+                            label="📥 အသံဖိုင်ဒေါင်းလုဒ်",
+                            data=f,
+                            file_name="video_dialogue_burmese.mp3",
+                            mime="audio/mp3"
+                        )
                 
-                # Clean original temp file
+                # ၆။ Cleanup
                 if os.path.exists(video_path):
                     os.remove(video_path)
+                if os.path.exists(audio_path):
+                    os.remove(audio_path)
+                if os.path.exists(output_audio):
+                    os.remove(output_audio)
                     
+                st.balloons()
+                
             except Exception as e:
-                st.error(f"❌ Dubbing process မှာ error: {str(e)}")
-                import traceback
-                st.code(traceback.format_exc())
+                st.error(f"❌ အမှားတစ်ခုဖြစ်နေပါတယ်: {str(e)}")
+                st.info("ကျေးဇူးပြု၍ နောက်တစ်ကြိမ် ထပ်စမ်းကြည့်ပါ။")
 
 st.markdown("---")
 st.markdown("""
-### 🎯 Dubbing System Features:
-1. **လူပြောသံကို detect** - Whisper နဲ့ စကားပြောအပိုင်းတွေကို ဖော်ထုတ်
-2. **Timing sync** - မူရင်းအချိန်နဲ့ ကိုက်ညီအောင်
-3. **Context-aware translation** - ဇတ်လမ်းအလိုက် ပြန်ဆို
-4. **Lip-sync attempt** - ပါးစပ်လှုပ်ရှားမှုနဲ့ နီးစပ်အောင်
-
-### ⚠️ Limitations:
-- Perfect lip-sync အတွက် AI voice cloning လိုအပ်တယ်
-- Background music/sounds ကို preserve လုပ်ဖို့ ပိုအဆင့်မြင့်တယ်
-- Multiple speakers အတွက် ခွဲခြားဖို့လိုတယ်
+### 📋 သိထားသင့်သည်များ:
+1. **Video ထဲက လူစကားသံကိုပဲ ဘာသာပြန်ပေးမည်**
+2. **အသံရှင်းလျှင် ပိုကောင်းပါသည်**
+3. **တစ်ကြိမ်တည်း 5 မိနစ်အောက် video ကိုသာ အကြံပြုပါသည်**
+4. **ဘာသာစကားအားလုံးကို မြန်မာလိုပြန်ပေးမည်**
 """)
