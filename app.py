@@ -1,4 +1,5 @@
 import streamlit as st
+import whisper
 from groq import Groq
 import edge_tts
 import asyncio
@@ -9,60 +10,52 @@ import os
 GROQ_API_KEY = "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"
 client = Groq(api_key=GROQ_API_KEY)
 
-st.set_page_config(page_title="Ultra AI Translator", page_icon="🎬")
-st.title("🎬 High-Quality AI Video Translator")
-st.markdown("ဗီဒီယိုထဲက ဘာသာစကားကို အလိုအလျောက်သိရှိပြီး သဘာဝကျသော မြန်မာစကားပြောအဖြစ် ပြောင်းလဲပေးပါသည်။")
+st.set_page_config(page_title="Universal AI Translator", page_icon="🌐")
+st.title("🌐 Universal AI Video Translator")
 
-uploaded_file = st.file_uploader("ဗီဒီယို တင်ပေးပါ", type=['mp4', 'mov', 'avi', 'mkv', 'mp3', 'wav'])
+@st.cache_resource
+def load_whisper():
+    return whisper.load_model("tiny")
+
+model = load_whisper()
+
+uploaded_file = st.file_uploader("ဗီဒီယို တင်ပေးပါ", type=['mp4', 'mov', 'avi', 'mkv'])
 
 if uploaded_file is not None:
     if st.button("စတင် ဘာသာပြန်ပါ"):
-        with st.spinner('AI က အဆင့်မြင့်ဆုံးစနစ်ဖြင့် လုပ်ဆောင်ပေးနေပါတယ်...'):
+        with st.spinner('AI က အဆင့်မြင့် Model သစ်ဖြင့် ဘာသာပြန်နေပါတယ်...'):
             try:
-                # ၁။ ဖိုင်ကို ယာယီသိမ်းခြင်း
-                suffix = os.path.splitext(uploaded_file.name)[1]
-                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tfile:
-                    tfile.write(uploaded_file.getbuffer())
-                    file_path = tfile.name
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tfile:
+                    tfile.write(uploaded_file.read())
+                    video_path = tfile.name
 
-                # ၂။ Groq Cloud Whisper (နောက်ဆုံးပေါ် model နာမည်အမှန် သုံးထားသည်)
-                st.info("အဆင့် (၁): စကားလုံးများကို တိကျအောင် နားထောင်နေပါတယ်...")
-                with open(file_path, "rb") as file:
-                    transcription = client.audio.transcriptions.create(
-                        file=(file_path, file.read()),
-                        model="whisper-large-v3", # ဒါက လက်ရှိ အသေချာဆုံး model ပါ
-                        response_format="text",
-                    )
-                original_text = transcription.strip()
-
-                if not original_text:
-                    st.error("အသံဖမ်းယူ၍ မရနိုင်ပါ။")
-                else:
-                    # ၃။ Groq Llama 3.3 နဲ့ ချောမွေ့သော မြန်မာဇာတ်ညွှန်းရေးခြင်း
-                    st.info("အဆင့် (၂): စာသားကို လူသားတစ်ယောက်လို ချောမွေ့အောင် အချောသပ်နေပါတယ်...")
-                    completion = client.chat.completions.create(
-                        model="llama-3.3-70b-versatile",
-                        messages=[
-                            {
-                                "role": "system", 
-                                "content": "You are an expert Burmese screenplayer. Translate the input into very natural, professional, and smooth spoken Burmese narration. Do not use formal book language. Make it sound like a person narrating a movie. Output only the Burmese translation."
-                            },
-                            {"role": "user", "content": f"Translate this into smooth Burmese: {original_text}"}
-                        ]
-                    )
-                    mm_text = completion.choices[0].message.content
-                    
-                    # ၄။ မြန်မာ AI အသံထုတ်ခြင်း (ZawZaw က အချောဆုံးပါ)
-                    st.info("အဆင့် (၃): သဘာဝကျသော မြန်မာအသံကို ဖန်တီးနေပါတယ်...")
-                    output_audio = "final_output.mp3"
-                    communicate = edge_tts.Communicate(mm_text, "my-MM-ZawZawNeural")
-                    asyncio.run(communicate.save(output_audio))
-
-                    st.success("ဘာသာပြန်ခြင်း အောင်မြင်ပါတယ်!")
-                    st.subheader("မြန်မာ Script")
-                    st.write(mm_text)
-                    st.audio(output_audio)
+                # ၁။ အသံကို စာသားပြောင်း
+                result = model.transcribe(video_path)
+                original_text = result['text']
+                detected_lang = result.get('language', 'unknown')
                 
-                os.remove(file_path)
+                st.write(f"🔍 သိရှိရသော ဘာသာစကား: **{detected_lang.upper()}**")
+
+                # ၂။ Groq Llama 3.3 နဲ့ မြန်မာလို ပြန်ဆို (Model နာမည်အသစ် ပြင်ထားပါတယ်)
+                completion = client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[
+                        {"role": "system", "content": "You are a professional Burmese translator. Translate the text into natural Burmese. Only provide the translation."},
+                        {"role": "user", "content": f"Translate this {detected_lang} text to natural Burmese: {original_text}"}
+                    ]
+                )
+                mm_text = completion.choices[0].message.content
+                
+                # ၃။ မြန်မာ AI အသံထုတ်
+                output_audio = "final_voice.mp3"
+                communicate = edge_tts.Communicate(mm_text, "my-MM-ThihaNeural")
+                asyncio.run(communicate.save(output_audio))
+
+                st.success("ဘာသာပြန်ခြင်း ပြီးပါပြီ!")
+                st.subheader("မြန်မာ Script")
+                st.write(mm_text)
+                st.audio(output_audio)
+                
+                os.remove(video_path)
             except Exception as e:
-                st.error(f"Error အသေးစိတ်: {str(e)}")
+                st.error(f"Error ဖြစ်သွားပါတယ်: {str(e)}")
