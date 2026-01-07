@@ -1,74 +1,115 @@
 import streamlit as st
+import whisper
 from groq import Groq
 import edge_tts
 import asyncio
 import tempfile
 import os
+import re
 
 # Groq Setup
 GROQ_API_KEY = "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"
 client = Groq(api_key=GROQ_API_KEY)
 
-st.set_page_config(page_title="Pro AI Video Translator", page_icon="🎙️")
-st.title("🎙️ Professional AI Video Translator")
-st.markdown("ဗီဒီယိုထဲက ဘာသာစကားကို Narrator တစ်ယောက်လို ချောမွေ့စွာ ပြန်ဆိုပေးပါသည်။")
+st.set_page_config(page_title="Universal AI Translator", page_icon="🌐")
+st.title("🌐 Universal AI Video Translator")
 
-uploaded_file = st.file_uploader("ဗီဒီယို တင်ပေးပါ", type=['mp4', 'mov', 'avi', 'mkv', 'mp3'])
+@st.cache_resource
+def load_whisper():
+    return whisper.load_model("tiny")
+
+model = load_whisper()
+
+def clean_myanmar_text(text):
+    """မြန်မာစာသားကို သန့်ရှင်းပြီး စာကြောင်းတစ်ခုစီကို သပ်သပ်ရပ်ရပ် ဖြစ်အောင်လုပ်ပေးခြင်း"""
+    # ပိုက်ဆံထူးတွေကို ဖယ်ရှားခြင်း
+    text = re.sub(r'[၊။]+', lambda m: m.group() + ' ', text)
+    # အပိုဖြည့်စွက်ခြင်း
+    text = text.replace("  ", " ")
+    return text.strip()
+
+uploaded_file = st.file_uploader("ဗီဒီယို တင်ပေးပါ", type=['mp4', 'mov', 'avi', 'mkv'])
 
 if uploaded_file is not None:
     if st.button("စတင် ဘာသာပြန်ပါ"):
-        with st.spinner('AI က နောက်ခံစကားပြောသူတစ်ယောက်လို ဖန်တီးပေးနေပါတယ်...'):
+        with st.spinner('AI က အဆင့်မြင့် Model သစ်ဖြင့် ဘာသာပြန်နေပါတယ်...'):
             try:
-                # ၁။ ဖိုင်ကို ယာယီသိမ်းခြင်း
-                file_ext = os.path.splitext(uploaded_file.name)[1]
-                with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tfile:
-                    tfile.write(uploaded_file.getbuffer())
-                    temp_path = tfile.name
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tfile:
+                    tfile.write(uploaded_file.read())
+                    video_path = tfile.name
 
-                # ၂။ Groq Cloud သုံးပြီး အသံကို စာသားပြောင်းခြင်း (Error ကင်းပြီး ပိုတိကျပါတယ်)
-                st.info("အဆင့် (၁): အသံကို တိကျအောင် နားထောင်နေပါတယ်...")
-                with open(temp_path, "rb") as audio_file:
-                    transcription = client.audio.transcriptions.create(
-                        file=(temp_path, audio_file.read()),
-                        model="whisper-large-v3",
-                        response_format="verbose_json",
+                # ၁။ အသံကို စာသားပြောင်း
+                result = model.transcribe(video_path)
+                original_text = result['text']
+                detected_lang = result.get('language', 'unknown')
+                
+                st.write(f"🔍 သိရှိရသော ဘာသာစကား: **{detected_lang.upper()}**")
+
+                # ၂။ Groq Llama 3.3 နဲ့ မြန်မာလို ပြန်ဆို (ပိုပြီး natural ဖြစ်အောင် prompt update)
+                completion = client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[
+                        {"role": "system", "content": """မင်းက professional Burmese translator နဲ့ narrator တစ်ယောက်ဖြစ်တယ်။ 
+                        ဘာသာပြန်တဲ့အခါ အချက်အလက်တွေကို တိတိကျကျပေးရမယ်၊ 
+                        စကားပြောသလို ချောမွေ့ပြီး နားထောင်ရလွယ်အောင်ပြန်ရမယ်။ 
+                        စာကြောင်းတွေကို သပ်သပ်ရပ်ရပ် ခွဲပေးပါ။ 
+                        အဓိပ္ပာယ်တူသော မြန်မာစကားလုံးတွေကို သုံးပါ။
+                        ဘာသာပြန်ချက်တစ်ခုတည်းကိုပဲ ပြန်ပေးပါ။"""},
+                        {"role": "user", "content": f"""ဒီ {detected_lang} စာသားကို မြန်မာလိုပြန်ပေးပါ။ 
+                        သတိထားရမှာက: 
+                        1. တိတိကျကျပြန်ပါ
+                        2. နားထောင်ရလွယ်အောင် ချောချောမွေ့မွေ့ပြန်ပါ
+                        3. စာကြောင်းတွေကို သပ်သပ်ရပ်ရပ် ခွဲပါ
+                        
+                        စာသား: {original_text}"""}
+                    ],
+                    temperature=0.7,
+                    max_tokens=2000
+                )
+                mm_text = completion.choices[0].message.content
+                
+                # စာသားကို သန့်ရှင်းအောင်လုပ်ခြင်း
+                mm_text = clean_myanmar_text(mm_text)
+                
+                # ၃။ မြန်မာ AI အသံထုတ် (narrator လို natural ဖြစ်အောင်)
+                output_audio = "final_voice.mp3"
+                communicate = edge_tts.Communicate(
+                    mm_text, 
+                    "my-MM-ThihaNeural",
+                    rate="+10%",  # နည်းနည်းမြန်အောင်
+                    pitch="+2Hz"  # သဘာဝကျအောင်
+                )
+                asyncio.run(communicate.save(output_audio))
+
+                st.success("✅ ဘာသာပြန်ခြင်း ပြီးပါပြီ!")
+                
+                st.subheader("📝 မြန်မာစာသား (Script)")
+                st.text_area("ဘာသာပြန်ထားသော စာသား", mm_text, height=200)
+                
+                st.subheader("🔊 AI Narrator အသံ")
+                st.audio(output_audio)
+                
+                # ဒေါင်းလုဒ်လုပ်လို့ရအောင်
+                with open(output_audio, "rb") as file:
+                    btn = st.download_button(
+                        label="အသံဖိုင်ကို ဒေါင်းလုဒ်ရယူမယ်",
+                        data=file,
+                        file_name="myanmar_translation.mp3",
+                        mime="audio/mp3"
                     )
                 
-                original_text = transcription.text.strip()
-                detected_lang = transcription.language
-
-                if not original_text:
-                    st.error("ဗီဒီယိုထဲမှာ အသံရှာမတွေ့ပါ။")
-                else:
-                    st.write(f"🔍 သိရှိရသော ဘာသာစကား: **{detected_lang.upper()}**")
-
-                    # ၃။ Narrator Script ရေးခြင်း
-                    st.info("အဆင့် (၂): နောက်ခံစကားပြောဟန်ဖြင့် အချောသပ်နေပါတယ်...")
-                    completion = client.chat.completions.create(
-                        model="llama-3.3-70b-versatile",
-                        messages=[
-                            {
-                                "role": "system", 
-                                "content": "You are a professional Burmese documentary narrator. Translate the text into engaging, smooth, and natural spoken Burmese. Use expressive language that sounds like a human storyteller. Avoid formal or robotic book language. Output only the Burmese translation."
-                            },
-                            {"role": "user", "content": f"Translate this {detected_lang} text into a smooth Burmese narration: {original_text}"}
-                        ]
-                    )
-                    mm_text = completion.choices[0].message.content
+                os.remove(video_path)
+                if os.path.exists(output_audio):
+                    os.remove(output_audio)
                     
-                    # ၄။ မြန်မာ AI အသံထုတ်ခြင်း (ZawZaw က အချောဆုံးပါ)
-                    st.info("အဆင့် (၃): သဘာဝကျသော မြန်မာအသံကို ဖန်တီးနေပါတယ်...")
-                    output_audio = "narrator_voice.mp3"
-                    communicate = edge_tts.Communicate(mm_text, "my-MM-ZawZawNeural")
-                    asyncio.run(communicate.save(output_audio))
-
-                    st.success("ဘာသာပြန်ခြင်း အောင်မြင်ပါတယ်!")
-                    st.subheader("မြန်မာ Narrator Script")
-                    st.text_area("", mm_text, height=250)
-                    
-                    st.subheader("မြန်မာ AI အသံ (Professional Voice)")
-                    st.audio(output_audio)
-                
-                os.remove(temp_path)
             except Exception as e:
-                st.error(f"Error အသေးစိတ်: {str(e)}")
+                st.error(f"❌ Error ဖြစ်သွားပါတယ်: {str(e)}")
+                st.info("ကျေးဇူးပြု၍ နောက်တစ်ကြိမ် ထပ်စမ်းကြည့်ပါ။")
+
+st.markdown("---")
+st.markdown("""
+**📌 သတိပြုရန်:**
+- ဗီဒီယိုဖိုင်အရွယ်အစားကို 100MB အောက်ထားပါ
+- အသံရှင်းလင်းမှ ပိုကောင်းပါတယ်
+- ဘာသာပြန်ချိန် ဖိုင်အရွယ်အစားပေါ်မူတည်ပါတယ်
+""")
