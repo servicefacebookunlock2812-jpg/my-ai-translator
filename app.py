@@ -5,7 +5,6 @@ import edge_tts
 import asyncio
 import tempfile
 import os
-from moviepy.editor import VideoFileClip
 
 # Groq Setup
 GROQ_API_KEY = "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"
@@ -16,7 +15,8 @@ st.title("🎬 High-Quality AI Video Translator")
 
 @st.cache_resource
 def load_whisper():
-    return whisper.load_model("base")
+    # RAM မစားအောင် အပေါ့စား model ကို သုံးထားပါတယ်
+    return whisper.load_model("tiny")
 
 model = load_whisper()
 
@@ -24,52 +24,47 @@ uploaded_file = st.file_uploader("ဗီဒီယို တင်ပေးပါ
 
 if uploaded_file is not None:
     if st.button("စတင် ဘာသာပြန်ပါ"):
-        with st.spinner('AI က အသံကို သေချာဖတ်ပြီး အချောသပ်နေပါတယ်...'):
-            video_path = "temp_video.mp4"
-            audio_path = "temp_audio.mp3"
+        with st.spinner('AI က ဗီဒီယိုကို စစ်ဆေးနေပါတယ်...'):
             try:
-                # ၁။ ဗီဒီယို သိမ်းပြီး အသံကို သီးသန့်ထုတ်ယူခြင်း
-                with open(video_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                
-                st.info("အဆင့် (၁): ဗီဒီယိုထဲက အသံကို ကြည်လင်အောင် ဖမ်းယူနေပါတယ်...")
-                video = VideoFileClip(video_path)
-                video.audio.write_audiofile(audio_path, logger=None)
-                video.close()
+                # ၁။ ဗီဒီယိုကို ယာယီသိမ်းခြင်း
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tfile:
+                    tfile.write(uploaded_file.read())
+                    video_path = tfile.name
 
-                # ၂။ အသံကို စာသားပြောင်းခြင်း
-                st.info("အဆင့် (၂): စကားလုံးများကို တိကျအောင် နားထောင်နေပါတယ်...")
-                result = model.transcribe(audio_path, fp16=False)
+                # ၂။ အသံကို တိုက်ရိုက် စာသားပြောင်းခြင်း (အသံဖမ်းစနစ်ကို ပိုကောင်းအောင် ပြင်ထားတယ်)
+                st.info("အဆင့် (၁): ဗီဒီယိုထဲက စကားလုံးတွေကို နားထောင်နေပါတယ်...")
+                result = model.transcribe(video_path, task="transcribe")
                 original_text = result['text'].strip()
 
                 if not original_text:
-                    st.error("ဗီဒီယိုထဲမှာ စကားပြောသံ လုံးဝ ရှာမတွေ့ပါဘူး။")
+                    st.warning("ဗီဒီယိုထဲမှာ စကားပြောသံ ရှာမတွေ့ပါဘူး။ အသံပါတဲ့ ဗီဒီယိုနဲ့ ပြန်စမ်းပေးပါဗျ။")
                 else:
-                    # ၃။ Groq နဲ့ အကောင်းဆုံး မြန်မာ Script ရေးခြင်း
-                    st.info("အဆင့် (၃): စာသားကို ရုပ်ရှင်နောက်ခံစကားပြောဟန်ဖြင့် အချောသပ်နေပါတယ်...")
+                    detected_lang = result.get('language', 'unknown')
+                    st.write(f"🔍 သိရှိရသော ဘာသာစကား: **{detected_lang.upper()}**")
+
+                    # ၃။ Groq နဲ့ အချောဆုံး မြန်မာ Script ရေးခြင်း
+                    st.info("အဆင့် (၂): လူသားတစ်ယောက်လို ချောမွေ့အောင် ပြန်ဆိုနေပါတယ်...")
                     completion = client.chat.completions.create(
                         model="llama-3.3-70b-versatile",
                         messages=[
-                            {"role": "system", "content": "You are a professional Burmese movie scriptwriter. Translate the text into very smooth, natural, and engaging spoken Burmese. Avoid bookish language. Make it sound like a real person talking in a video. Only output the translated Burmese text."},
-                            {"role": "user", "content": f"Translate this perfectly: {original_text}"}
+                            {"role": "system", "content": "You are a professional Burmese translator. Translate to natural, engaging, spoken Burmese script. Only provide the translation."},
+                            {"role": "user", "content": f"Translate this: {original_text}"}
                         ]
                     )
                     mm_text = completion.choices[0].message.content
                     
-                    # ၄။ မြန်မာ AI အသံထုတ်ခြင်း
-                    st.info("အဆင့် (၄): သဘာဝကျသော မြန်မာအသံကို ဖန်တီးနေပါတယ်...")
-                    output_audio = "final_output.mp3"
+                    # ၄။ မြန်မာအသံထုတ်ခြင်း
+                    st.info("အဆင့် (၃): သဘာဝကျသော မြန်မာအသံကို ဖန်တီးနေပါတယ်...")
+                    output_audio = "final_voice.mp3"
+                    # ZawZaw အသံက ပိုချောပါတယ်
                     communicate = edge_tts.Communicate(mm_text, "my-MM-ZawZawNeural")
                     asyncio.run(communicate.save(output_audio))
 
-                    st.success("ဘာသာပြန်ခြင်း အောင်မြင်စွာ ပြီးဆုံးပါပြီ!")
+                    st.success("ဘာသာပြန်ခြင်း ပြီးပါပြီ!")
                     st.subheader("မြန်မာ Script")
                     st.write(mm_text)
                     st.audio(output_audio)
                 
+                os.remove(video_path)
             except Exception as e:
                 st.error(f"Error: {str(e)}")
-            finally:
-                # ဖိုင်အဟောင်းများ ရှင်းလင်းခြင်း
-                if os.path.exists(video_path): os.remove(video_path)
-                if os.path.exists(audio_path): os.remove(audio_path)
