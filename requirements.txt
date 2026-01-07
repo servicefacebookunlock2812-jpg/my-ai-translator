@@ -1,5 +1,4 @@
 openai-whisper
-moviepy
+groq
 edge-tts
-google-generativeai
 streamlit
